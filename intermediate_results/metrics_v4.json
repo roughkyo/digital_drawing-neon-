@@ -1,0 +1,43 @@
+{
+  "version": "v4",
+  "elapsed_sec": 43.94,
+  "total_strokes": 80795,
+  "palette_step": 32,
+  "palette_swatches": 118,
+  "stage_counts": {
+    "Underpainting": 286,
+    "Block-in": 602,
+    "Big shapes": 1420,
+    "Forms": 1750,
+    "Modeling": 4050,
+    "Refining": 7536,
+    "Details": 20600,
+    "Fine details": 30400,
+    "Final touches": 14151
+  },
+  "metrics": {
+    "global_psnr": 29.717,
+    "global_ssim": 0.7662,
+    "global_mae": 5.548,
+    "eyes_psnr": 34.99,
+    "eyes_mae": 3.24,
+    "features_psnr": 30.91,
+    "features_mae": 4.85,
+    "face_psnr": 29.02,
+    "face_mae": 5.94,
+    "beard_psnr": 25.79,
+    "beard_mae": 9.19,
+    "hat_psnr": 28.9,
+    "hat_mae": 6.5,
+    "badge_psnr": 25.37,
+    "badge_mae": 9.6,
+    "belt_psnr": 27.28,
+    "belt_mae": 7.51,
+    "robe_psnr": 28.67,
+    "robe_mae": 6.38,
+    "pelt_psnr": 29.05,
+    "pelt_mae": 6.32,
+    "bg_psnr": 35.95,
+    "bg_mae": 3.11
+  }
+}

@@ -1,13 +1,66 @@
-"""Generate layered, form-following curved brush strokes to paint reference.png (v2).
+"""Stroke Planner for Admiral Yi Sun-sin Portrait (v4 — 9-Stage Artist Pipeline).
 
-Improvements in v2:
-- Added Brush Type 3 (btype=3, Ultra-Fine Pointed Round / Se-pil Hairline Brush) matching app.js 1:1.
-- Upgraded error-guided sampler from center-pixel 4x4 grid to peak-error 4x4 max-pooling,
-  guaranteeing 1-pixel beard hairs, eyelid lines, tiger spots, and robe ink contours never get missed.
-- Silky 2-layer atmospheric background underwash + dedicated low-opacity bg glazing to remove blotchiness.
-- Dedicated Stage 4 feature passes: contour-ridge ink lines (의습선), subtle crimson brocade,
-  Samo wing wood-grain, outward radial leopard-pelt fur, twin-tiger micro-embroidery,
-  ultra-fine vertical beard hairs (세필 수염), and razor-crisp eyes/brows/nose/lips.
+================================================================================
+STUDY OF REFERENCE.PNG (DRIVES ALL STAGE ALLOCATION, FLOW & VERIFICATION)
+================================================================================
+1. Subject and Composition
+   - Traditional frontal three-quarter-length Joseon official portrait of Admiral
+     Yi Sun-sin (충무공 이순신 표준영정, 1280x1932, aspect ratio 0.662526) centered
+     symmetrically against an aged golden-ochre silk scroll background.
+   - Major mass placement (normalized x, y):
+     * Samo official hat (사모): tall rounded two-tier dome (x 0.37–0.62, y 0.03–0.21)
+       with symmetrical rounded-rectangular side wings (양각, x 0.26–0.73, y 0.12–0.19).
+     * Head, face & ears: centered (x 0.37–0.63, y 0.18–0.36); long flowing beard
+       descending over neck and collar (x 0.37–0.62, y 0.29–0.46).
+     * Crimson official robe (홍단령): fills lower two-thirds (x 0.04–0.99, y 0.34–1.00)
+       with broad crossed sleeves resting horizontally across the waist (y 0.70–0.86).
+     * Twin-tiger rank badge (쌍호흉배): centered chest square (x 0.33–0.68, y 0.48–0.68),
+       anchored by curved official belt (각대, x 0.30–0.71, y 0.65–0.73) and pale ivory
+       hanging sash emerging below (x 0.45–0.55, y 0.70–1.00).
+     * Leopard pelt drape (표피): feathery spotted fur wings behind left (x 0.00–0.23)
+       and right (x 0.80–1.00) shoulders (y 0.40–0.82).
+   - Lighting: soft, even upper-frontal traditional portrait illumination; gentle warmth
+     on top silk scroll, upper forehead, nose bridge, cheekbones, and top hat crown,
+     deepening softly toward lower edges and under crossed sleeve folds.
+
+2. Recognisable Features (7 Key Landmarks — Priority for Extra Passes & Finest Brushes)
+   - [F1] Piercing calm eyes & arched brows: almond horizontal eyes (left x~0.445,
+     right x~0.542, y~0.236) with crisp dark ink upper eyelid contours flickering
+     cleanly outward, delicate double-lid creases, dark espresso irises with subtle
+     warm amber catchlights, warm-ivory sclera, and softly feathered arched brows.
+   - [F2] Sculpted nose, solemn lips & drooping mustache: luminous vertical nose bridge,
+     delicate alar shadows, calm muted terracotta-rose lips with firm closed line, full
+     dark charcoal-umber mustache curving downward and small chin soul-patch tuft.
+   - [F3] Long flowing vertical se-pil beard & wispy sideburns: hundreds of crisp 1px
+     vertical dark hairs layered over pale neck skin and deep crimson collar, allowing
+     bright warm skin/crimson gaps to show through between strands.
+   - [F4] Two-tier Samo hat & swirling wood-grain gauze wings (양각): deep matte umber
+     crown with subtle tier step and dark forehead rim; translucent ochre wings with
+     crisp dark borders and swirling horizontal lacquer-grain curves.
+   - [F5] Twin-tiger embroidered rank badge (쌍호흉배): deep olive-charcoal ground with
+     two symmetrical facing pale-ivory tigers/leopards covered in tiny dark ringed spots,
+     whiskers, alert eyes, curved tails, central crimson lotus blossom, curling white sea
+     waves, stylized central peak, and layered multicolor lower wave bands.
+   - [F6] Official belt (각대) & ivory sash: curved dark woven-lattice belt with gleaming
+     pale-gold framed black lacquer plaques (center rectangle, twin bars, outer circles)
+     above the pale warm-ivory descending cloth sash.
+   - [F7] Crimson robe ink drapery lines (의습선), subtle cloud brocade (운보문) & leopard
+     pelt (표피): sweeping unbroken dark-burgundy/black fold creases across the collar,
+     shoulder knot tab, and crossed sleeves; subtle tone-on-tone brocade clouds; outward-
+     radiating feathery leopard fur and bold dark crescent rosettes behind the shoulders.
+
+3. Color & Value Character
+   - Warm, unified mineral-pigment and aged-silk temperature throughout (no cold blues or
+     stark pure whites).
+   - Dominant palette: warm golden-ochre aged silk (#EBD09B top -> #C48F5C mid-lower),
+     luminous warm golden-peach skin (#DBA973 with warm sienna shading), deep carmine-
+     burgundy silk (#802634; highlights #A03744, creases #370E18), rich warm umber/espresso
+     darks (#24140D–#5D2F18 — deep but never flat dead black), olive-charcoal embroidery
+     (#3C442D), and clean antique-ivory highlights (#E6DEC6 — clean, never blown out).
+   - Surface textures: serene flat aged-silk background (kept loose & smooth, never noisy),
+     soft barim facial transitions, crisp fine se-pil ink lines and individual hair/fur
+     strokes following exact anatomical/drapery/growth directions.
+================================================================================
 """
 
 from __future__ import annotations
@@ -32,6 +85,18 @@ VIS_DIR = ROOT / "visualizations"
 INT_DIR = ROOT / "intermediate_results"
 VIS_DIR.mkdir(parents=True, exist_ok=True)
 INT_DIR.mkdir(parents=True, exist_ok=True)
+
+STAGE_NAMES = [
+    "Underpainting",
+    "Block-in",
+    "Big shapes",
+    "Forms",
+    "Modeling",
+    "Refining",
+    "Details",
+    "Fine details",
+    "Final touches",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +282,6 @@ def build_stroke_mask(
     trans = np.ones((bh, bw), dtype=np.float32)
 
     if btype == 0:
-        # Type 0: Soft Round Wash (radial gradient dabs along quadratic Bezier)
         approx_len = math.hypot(cx - x0, cy - y0) + math.hypot(x1 - cx, y1 - cy)
         step = max(2.5, r * 0.55)
         n_dabs = int(round(approx_len / step)) + 1
@@ -238,7 +302,6 @@ def build_stroke_mask(
             _stamp_radial_dab(trans, bx0, by0, px, py, r, dab_alpha)
 
     elif btype == 1:
-        # Type 1: Bristle Brush (soft base + 5 tapered parallel filaments)
         dx = x1 - x0
         dy = y1 - y0
         dlen = math.hypot(dx, dy)
@@ -274,11 +337,9 @@ def build_stroke_mask(
                 opacity * weights[i],
             )
     elif btype == 2:
-        # Type 2: Fine Soft-Round Brush (2 concentric passes)
         _rasterize_bezier_stroke(trans, bx0, by0, x0, y0, cx, cy, x1, y1, r * 1.05, opacity * 0.38)
         _rasterize_bezier_stroke(trans, bx0, by0, x0, y0, cx, cy, x1, y1, r * 0.62, opacity * 0.78)
     else:
-        # Type 3: Ultra-Fine Pointed Hair / Se-pil Round Liner Brush
         _rasterize_bezier_stroke(trans, bx0, by0, x0, y0, cx, cy, x1, y1, max(0.375, r * 0.74), opacity)
 
     mask = np.float32(1.0) - trans
@@ -579,8 +640,15 @@ def run_error_guided_pass(
     bias_y: float,
     bias_strength: float,
     peak_pooling: bool,
+    local_hand_prob: float,
+    local_hand_radius: float,
 ):
-    """Sample high-error locations inside roi_mask (using peak-error 4x4 pooling for thin features)."""
+    """Error-guided curved stroke pass with peak-error pooling + local artist-hand momentum.
+
+    Local artist-hand momentum keeps consecutive strokes flowing organically in the same
+    neighborhood (so the live brush cursor glides smoothly like an artist's hand) while
+    preserving exact z-order fidelity.
+    """
     h, w, _ = canvas.shape
     out = np.empty((max_accept, 12), dtype=np.float32)
     accepted = 0
@@ -590,10 +658,16 @@ def run_error_guided_pass(
     gw = (w + 3) // 4
     n_cells = gh * gw
     cdf = np.empty(n_cells, dtype=np.float64)
+    cell_err = np.empty(n_cells, dtype=np.float32)
     best_dx = np.empty(n_cells, dtype=np.int8)
     best_dy = np.empty(n_cells, dtype=np.int8)
 
     rng_state = np.uint64(seed_offset * 6364136223846793005 + 1442695040888963407)
+
+    has_hand = False
+    hand_x = w * 0.5
+    hand_y = h * 0.5
+    local_misses = 0
 
     cand_idx = 0
     while cand_idx < n_candidates and accepted < max_accept:
@@ -607,7 +681,6 @@ def run_error_guided_pass(
                 x_end = min(w, x_base + 4)
 
                 if peak_pooling:
-                    # Find exact peak-error pixel inside the 4x4 cell so 1px hairs/lines never slip through
                     max_p = 0.0
                     bdx = 2
                     bdy = 2
@@ -625,6 +698,7 @@ def run_error_guided_pass(
                                     bdx = x - x_base
                                     bdy = y - y_base
                     total += max_p
+                    cell_err[idx_c] = float(max_p)
                     best_dx[idx_c] = bdx
                     best_dy[idx_c] = bdy
                 else:
@@ -640,6 +714,7 @@ def run_error_guided_pass(
                     else:
                         p = 0.0
                     total += p
+                    cell_err[idx_c] = float(p)
                     best_dx[idx_c] = 2
                     best_dy[idx_c] = 2
 
@@ -652,6 +727,8 @@ def run_error_guided_pass(
         batch_end = min(n_candidates, cand_idx + block_size)
         while cand_idx < batch_end and accepted < max_accept:
             rng_state = rng_state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
+            u0 = float((rng_state >> np.uint64(16)) & np.uint64(0xFFFFFFFF)) / 4294967296.0
+            rng_state = rng_state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
             u1 = float((rng_state >> np.uint64(16)) & np.uint64(0xFFFFFFFF)) / 4294967296.0
             rng_state = rng_state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
             u2 = float((rng_state >> np.uint64(16)) & np.uint64(0xFFFFFFFF)) / 4294967296.0
@@ -662,20 +739,45 @@ def run_error_guided_pass(
             rng_state = rng_state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
             u5 = float((rng_state >> np.uint64(16)) & np.uint64(0xFFFFFFFF)) / 4294967296.0
 
-            target_val = u1 * total
-            lo = 0
-            hi = n_cells - 1
-            while lo < hi:
-                mid = (lo + hi) >> 1
-                if cdf[mid] < target_val:
-                    lo = mid + 1
-                else:
-                    hi = mid
-            gy = lo // gw
-            gx = lo % gw
+            use_local = has_hand and (local_hand_prob > 0.0) and (u0 < local_hand_prob) and (local_misses < 5)
+            chosen_cell = -1
+
+            if use_local:
+                # Pick highest-error cell among 8 nearby samples around artist's current hand position
+                best_lp = 0.0
+                for _k in range(8):
+                    rng_state = rng_state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
+                    la = float((rng_state >> np.uint64(16)) & np.uint64(0xFFFFFFFF)) / 4294967296.0 * 6.2831853
+                    rng_state = rng_state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
+                    lr = math.sqrt(float((rng_state >> np.uint64(16)) & np.uint64(0xFFFFFFFF)) / 4294967296.0) * local_hand_radius
+                    lx = hand_x + math.cos(la) * lr
+                    ly = hand_y + math.sin(la) * lr
+                    if 0.0 <= lx < w and 0.0 <= ly < h:
+                        lgx = min(gw - 1, int(lx) // 4)
+                        lgy = min(gh - 1, int(ly) // 4)
+                        lc = lgy * gw + lgx
+                        lp = cell_err[lc]
+                        if lp > best_lp:
+                            best_lp = lp
+                            chosen_cell = lc
+
+            if chosen_cell < 0:
+                target_val = u1 * total
+                lo = 0
+                hi = n_cells - 1
+                while lo < hi:
+                    mid = (lo + hi) >> 1
+                    if cdf[mid] < target_val:
+                        lo = mid + 1
+                    else:
+                        hi = mid
+                chosen_cell = lo
+
+            gy = chosen_cell // gw
+            gx = chosen_cell % gw
             if peak_pooling:
-                sx = min(float(w - 1), max(0.0, gx * 4.0 + float(best_dx[lo]) + (u2 - 0.5) * 0.9))
-                sy = min(float(h - 1), max(0.0, gy * 4.0 + float(best_dy[lo]) + (u3 - 0.5) * 0.9))
+                sx = min(float(w - 1), max(0.0, gx * 4.0 + float(best_dx[chosen_cell]) + (u2 - 0.5) * 0.9))
+                sy = min(float(h - 1), max(0.0, gy * 4.0 + float(best_dy[chosen_cell]) + (u3 - 0.5) * 0.9))
             else:
                 sx = min(float(w - 1), max(0.0, gx * 4.0 + u2 * 4.0))
                 sy = min(float(h - 1), max(0.0, gy * 4.0 + u3 * 4.0))
@@ -721,6 +823,14 @@ def run_error_guided_pass(
                 x1 = max(0.0, min(float(w - 1), sx + tvx * half_l))
                 y1 = max(0.0, min(float(h - 1), sy + tvy * half_l))
                 cx, cy = sx, sy
+
+            # Orient stroke consistently so cursor flows gracefully from nearest endpoint
+            if has_hand:
+                d0 = (x0 - hand_x) * (x0 - hand_x) + (y0 - hand_y) * (y0 - hand_y)
+                d1 = (x1 - hand_x) * (x1 - hand_x) + (y1 - hand_y) * (y1 - hand_y)
+                if d1 < d0:
+                    x0, x1 = x1, x0
+                    y0, y1 = y1, y0
 
             # Exact quantization matching exported painting-data.js
             x0 = round(x0 * 2.0) * 0.5
@@ -771,6 +881,13 @@ def run_error_guided_pass(
                 out[accepted, 10] = sg
                 out[accepted, 11] = sb
                 accepted += 1
+                has_hand = True
+                hand_x = x1
+                hand_y = y1
+                local_misses = 0
+                cell_err[chosen_cell] *= 0.35
+            else:
+                local_misses += 1
 
             cand_idx += 1
 
@@ -797,7 +914,7 @@ def compute_tangent_field(gray: np.ndarray, grad_sigma: float, tensor_sigma: flo
 
 
 def build_semantic_masks(h: int, w: int, gray: np.ndarray) -> dict[str, np.ndarray]:
-    """Create soft anatomical & compositional masks based on 01_coordinate_grid.png."""
+    """Create soft anatomical & compositional masks driven by the Reference Study."""
     yy, xx = np.mgrid[0:h, 0:w]
     xn = xx / float(w)
     yn = yy / float(h)
@@ -816,11 +933,10 @@ def build_semantic_masks(h: int, w: int, gray: np.ndarray) -> dict[str, np.ndarr
     gmag = np.hypot(gx, gy)
     g_norm = np.clip(gmag / (np.percentile(gmag, 96.5) + 1e-5), 0.0, 1.0).astype(np.float32)
 
-    eyes = np.clip(
-        ell_mask(0.445, 0.236, 0.048, 0.022, 3.5) + ell_mask(0.542, 0.236, 0.048, 0.022, 3.5),
-        0.0,
-        1.0,
-    )
+    eye_left = ell_mask(0.445, 0.236, 0.048, 0.022, 3.5)
+    eye_right = ell_mask(0.542, 0.236, 0.048, 0.022, 3.5)
+    eyes = np.clip(eye_left + eye_right, 0.0, 1.0)
+
     brows_nose_mouth = np.clip(
         rect_mask(0.395, 0.595, 0.205, 0.232, 3.5)
         + rect_mask(0.455, 0.540, 0.230, 0.292, 3.5)
@@ -837,6 +953,8 @@ def build_semantic_masks(h: int, w: int, gray: np.ndarray) -> dict[str, np.ndarr
         1.0,
     )
     chest_badge = rect_mask(0.328, 0.682, 0.476, 0.690, 5.0)
+    badge_left = rect_mask(0.328, 0.515, 0.476, 0.688, 4.0)
+    badge_right = rect_mask(0.495, 0.682, 0.476, 0.688, 4.0)
     belt = rect_mask(0.295, 0.715, 0.652, 0.734, 5.0)
     pelt_left = rect_mask(0.00, 0.235, 0.40, 0.83, 8.0)
     pelt_right = rect_mask(0.79, 1.00, 0.40, 0.80, 8.0)
@@ -858,12 +976,12 @@ def build_semantic_masks(h: int, w: int, gray: np.ndarray) -> dict[str, np.ndarr
         0.75
         + 1.05 * g_norm
         + 1.4 * hat
-        + 1.8 * belt
-        + 3.0 * chest_badge
-        + 2.8 * beard
+        + 1.9 * belt
+        + 3.2 * chest_badge
+        + 3.0 * beard
         + 3.0 * face_all
         + 5.5 * brows_nose_mouth
-        + 11.0 * eyes
+        + 12.0 * eyes
     ).astype(np.float32)
 
     return {
@@ -873,10 +991,14 @@ def build_semantic_masks(h: int, w: int, gray: np.ndarray) -> dict[str, np.ndarr
         "contour_fg": contour_fg,
         "hat": hat,
         "face": face_all,
+        "eye_left": eye_left,
+        "eye_right": eye_right,
         "eyes": eyes,
         "features": np.clip(eyes + brows_nose_mouth, 0.0, 1.0),
         "beard": beard,
         "badge": chest_badge,
+        "badge_left": badge_left,
+        "badge_right": badge_right,
         "belt": belt,
         "pelt": pelt,
         "pelt_left": pelt_left,
@@ -887,33 +1009,37 @@ def build_semantic_masks(h: int, w: int, gray: np.ndarray) -> dict[str, np.ndarr
     }
 
 
-def make_blocking_wash_strokes(
+def make_underpainting_strokes(
     canvas: np.ndarray,
     target: np.ndarray,
     weight: np.ndarray,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Stage 1 opening: 2-layer broad organic atmospheric washes across the blank canvas."""
+    """Stage 1 (Underpainting): Broad serpentine sweeping warm washes from top to bottom."""
     h, w, _ = canvas.shape
     strokes = []
     seed = 1000
 
-    # Layer A: Broad horizontal-angled soft washes establishing warm silk ground & major bands
     for pass_idx, (n_rows, n_cols, r_lo, r_hi, op_lo, op_hi) in enumerate([
-        (14, 9, 95.0, 138.0, 0.62, 0.82),
-        (18, 11, 68.0, 102.0, 0.38, 0.56),
+        (14, 9, 95.0, 138.0, 0.64, 0.84),
+        (17, 10, 68.0, 100.0, 0.36, 0.56),
     ]):
         for ry in range(n_rows):
-            for rx in range(n_cols):
-                cx = (rx + 0.5 + rng.uniform(-0.34, 0.34)) * (w / n_cols)
-                cy = (ry + 0.5 + rng.uniform(-0.34, 0.34)) * (h / n_rows)
-                ang = rng.uniform(-0.32, 0.32) if pass_idx == 0 else rng.uniform(-0.55, 0.55)
-                half_l = rng.uniform(85.0, 145.0) if pass_idx == 0 else rng.uniform(55.0, 105.0)
+            # Serpentine left-to-right then right-to-left so the live brush sweeps naturally!
+            cols = range(n_cols) if (ry % 2 == 0) else range(n_cols - 1, -1, -1)
+            dir_sign = 1.0 if (ry % 2 == 0) else -1.0
+            for rx in cols:
+                cx = (rx + 0.5 + rng.uniform(-0.32, 0.32)) * (w / n_cols)
+                cy = (ry + 0.5 + rng.uniform(-0.32, 0.32)) * (h / n_rows)
+                ang = rng.uniform(-0.28, 0.28) if pass_idx == 0 else rng.uniform(-0.50, 0.50)
+                half_l = rng.uniform(85.0, 145.0) if pass_idx == 0 else rng.uniform(55.0, 102.0)
                 bend = rng.uniform(-22.0, 22.0)
-                x0 = round(float(np.clip(cx - math.cos(ang) * half_l, 0, w - 1)) * 2.0) * 0.5
-                y0 = round(float(np.clip(cy - math.sin(ang) * half_l, 0, h - 1)) * 2.0) * 0.5
-                x1 = round(float(np.clip(cx + math.cos(ang) * half_l, 0, w - 1)) * 2.0) * 0.5
-                y1 = round(float(np.clip(cy + math.sin(ang) * half_l, 0, h - 1)) * 2.0) * 0.5
+                dx = math.cos(ang) * half_l * dir_sign
+                dy = math.sin(ang) * half_l * dir_sign
+                x0 = round(float(np.clip(cx - dx, 0, w - 1)) * 2.0) * 0.5
+                y0 = round(float(np.clip(cy - dy, 0, h - 1)) * 2.0) * 0.5
+                x1 = round(float(np.clip(cx + dx, 0, w - 1)) * 2.0) * 0.5
+                y1 = round(float(np.clip(cy + dy, 0, h - 1)) * 2.0) * 0.5
                 pcx = round(float(np.clip(cx - math.sin(ang) * bend, 0, w - 1)) * 2.0) * 0.5
                 pcy = round(float(np.clip(cy + math.cos(ang) * bend, 0, h - 1)) * 2.0) * 0.5
                 rad = round(float(rng.uniform(r_lo, r_hi)) * 10.0) * 0.1
@@ -950,28 +1076,44 @@ def compute_metrics(canvas: np.ndarray, target: np.ndarray, masks: dict[str, np.
     return metrics
 
 
+def choose_palette_step(stage_arrays: list[np.ndarray]) -> tuple[int, int]:
+    """Pick clean RGB quantization step keeping total palette in ~85–135 swatches (target 50–150)."""
+    all_rgb = np.vstack([a[:, 9:12] for a in stage_arrays if len(a) > 0])
+    candidates = [16, 20, 24, 28, 32, 36, 40]
+    counts = {}
+    for step in candidates:
+        q = np.clip(np.round(all_rgb / step) * step, 0, 255).astype(np.int32)
+        uniq = len(set(map(tuple, q.tolist())))
+        counts[step] = uniq
+    print("Palette swatch counts by RGB step:", counts)
+    # Pick step closest to ~110 within [60, 145]
+    best_step = min(candidates, key=lambda s: abs(counts[s] - 110))
+    return best_step, counts[best_step]
+
+
 def save_visualizations(
     version_tag: str,
     target: np.ndarray,
     stage_snapshots: list[np.ndarray],
     stage_counts: list[int],
 ) -> None:
-    """Save 4-stage progression, full side-by-side comparison, and 6-zone high-res detail crops."""
+    """Save 9-stage progression sheet, full side-by-side comparison, and 6-zone detail zooms."""
     final = np.clip(stage_snapshots[-1], 0, 255).astype(np.uint8)
     ref_u8 = target.astype(np.uint8)
     h, w, _ = ref_u8.shape
 
-    stage_names = ["1. Blocking in", "2. Form and color", "3. Refinement", "4. Fine details"]
-    fig, axes = plt.subplots(1, 5, figsize=(20, 7), dpi=130)
+    # 9 stages + Reference in a 2x5 gallery
+    fig, axes = plt.subplots(2, 5, figsize=(20, 12), dpi=125)
     cum = 0
-    for i in range(4):
+    for i in range(9):
         cum += stage_counts[i]
-        axes[i].imshow(np.clip(stage_snapshots[i], 0, 255).astype(np.uint8))
-        axes[i].set_title(f"{stage_names[i]}\n({cum:,} strokes)", fontsize=10)
-        axes[i].axis("off")
-    axes[4].imshow(ref_u8)
-    axes[4].set_title("Reference", fontsize=10)
-    axes[4].axis("off")
+        ax = axes[i // 5, i % 5]
+        ax.imshow(np.clip(stage_snapshots[i], 0, 255).astype(np.uint8))
+        ax.set_title(f"{i + 1}. {STAGE_NAMES[i]}\n({cum:,} strokes)", fontsize=10)
+        ax.axis("off")
+    axes[1, 4].imshow(ref_u8)
+    axes[1, 4].set_title("Reference", fontsize=10)
+    axes[1, 4].axis("off")
     plt.tight_layout()
     plt.savefig(VIS_DIR / f"stages_{version_tag}.png")
     plt.close(fig)
@@ -1017,16 +1159,24 @@ def save_visualizations(
     Image.fromarray(final).save(VIS_DIR / f"painted_{version_tag}.png")
 
 
-def export_painting_js(stage_arrays: list[np.ndarray], w: int, h: int, out_path: Path) -> None:
-    """Export compact JS data module loaded by index.html."""
-    stage_meta = [
-        "Blocking in",
-        "Form and color",
-        "Refinement",
-        "Fine details",
-    ]
+def export_painting_js(
+    stage_arrays: list[np.ndarray],
+    w: int,
+    h: int,
+    palette_step: int,
+    out_path: Path,
+) -> None:
+    """Export compact JS data module with 9 stages, representative brush sizes & palette step."""
+    stage_brush_sizes = []
     encoded_stages = []
     for arr in stage_arrays:
+        if len(arr) > 0:
+            med_diam = float(np.median(arr[:, 7]) * 2.0)
+            size_label = f"{med_diam:.1f} px" if med_diam < 10.0 else f"{int(round(med_diam))} px"
+        else:
+            size_label = "1 px"
+        stage_brush_sizes.append(size_label)
+
         flat = []
         for s in arr:
             flat.extend([
@@ -1048,18 +1198,20 @@ def export_painting_js(stage_arrays: list[np.ndarray], w: int, h: int, out_path:
     payload = {
         "width": w,
         "height": h,
-        "stageNames": stage_meta,
+        "paletteStep": palette_step,
+        "stageNames": STAGE_NAMES,
+        "stageBrushSizes": stage_brush_sizes,
         "stages": encoded_stages,
     }
     js_text = "window.PAINTING_DATA = " + json.dumps(payload, separators=(",", ":")) + ";\n"
     out_path.write_text(js_text, encoding="utf-8")
     size_kb = out_path.stat().st_size / 1024.0
-    print(f"Exported {out_path.name}: {size_kb:.1f} KB")
+    print(f"Exported {out_path.name}: {size_kb:.1f} KB | brush sizes: {stage_brush_sizes}")
 
 
 def main() -> None:
     t0 = time.perf_counter()
-    version_tag = "v3"
+    version_tag = "v5"
 
     img = Image.open(REF_PATH).convert("RGB")
     target = np.asarray(img, dtype=np.float32)
@@ -1086,301 +1238,283 @@ def main() -> None:
     stage_arrays: list[np.ndarray] = []
     stage_snapshots: list[np.ndarray] = []
 
-    # =========================================================================
-    # STAGE 1: BLOCKING IN (huge soft washes + rough tonal masses)
-    # =========================================================================
-    print("\n--- Stage 1: Blocking in ---")
-    s1_parts = [make_blocking_wash_strokes(canvas, target, weight, rng)]
-    s1_parts.append(
+    def commit_stage(stage_idx: int, parts: list[np.ndarray]) -> None:
+        arr = np.vstack(parts) if parts else np.zeros((0, 12), dtype=np.float32)
+        stage_arrays.append(arr)
+        stage_snapshots.append(canvas.copy())
+        psnr_now = compute_metrics(canvas, target, masks)["global_psnr"]
+        print(f"Stage {stage_idx + 1}/9 ({STAGE_NAMES[stage_idx]}): {len(arr):,} strokes | {psnr_now} dB")
+
+    # 1. UNDERPAINTING — Broad serpentine warm aged-silk & major tone washes
+    s1 = [make_underpainting_strokes(canvas, target, weight, rng)]
+    commit_stage(0, s1)
+
+    # 2. BLOCK-IN — Huge rough masses establishing hat, face, crimson robe, badge, belt, pelt
+    s2 = [
         run_error_guided_pass(
             canvas, target, weight, masks["all"], tx1, ty1, ref_s1,
             btype=0, r_min=34.0, r_max=76.0, opacity_min=0.46, opacity_max=0.76,
             step_mult=0.55, max_half_steps=5, color_thresh=50.0, max_color_dev=42.0,
-            min_gain_base=6.0, n_candidates=1300, max_accept=380, seed_offset=2000,
+            min_gain_base=6.0, n_candidates=1350, max_accept=400, seed_offset=2000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    s1_parts.append(
+            local_hand_prob=0.65, local_hand_radius=240.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["fg"], tx1, ty1, ref_s1,
-            btype=1, r_min=22.0, r_max=44.0, opacity_min=0.45, opacity_max=0.72,
+            btype=1, r_min=24.0, r_max=46.0, opacity_min=0.45, opacity_max=0.72,
             step_mult=0.60, max_half_steps=5, color_thresh=44.0, max_color_dev=42.0,
             min_gain_base=7.0, n_candidates=1000, max_accept=280, seed_offset=4000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    s1 = np.vstack(s1_parts)
-    stage_arrays.append(s1)
-    stage_snapshots.append(canvas.copy())
-    print(f"Stage 1 strokes: {len(s1):,} | {compute_metrics(canvas, target, masks)['global_psnr']} dB")
+            local_hand_prob=0.65, local_hand_radius=200.0,
+        ),
+    ]
+    commit_stage(1, s2)
 
-    # =========================================================================
-    # STAGE 2: FORM AND COLOR (silky background glazing + medium 3D sculpting)
-    # =========================================================================
-    print("\n--- Stage 2: Form and color ---")
-    s2_parts = []
-    # Silky atmospheric background wash smoothing (eliminates Stage 1 blotchiness)
-    s2_parts.append(
+    # 3. BIG SHAPES — Silky background smoothing + broad directional forms
+    s3 = [
         run_error_guided_pass(
             canvas, target, weight, masks["bg"], tx1, ty1, ref_s1,
-            btype=0, r_min=34.0, r_max=72.0, opacity_min=0.20, opacity_max=0.42,
+            btype=0, r_min=32.0, r_max=70.0, opacity_min=0.20, opacity_max=0.42,
             step_mult=0.55, max_half_steps=5, color_thresh=24.0, max_color_dev=26.0,
-            min_gain_base=1.0, n_candidates=1100, max_accept=420, seed_offset=9000,
+            min_gain_base=1.0, n_candidates=1150, max_accept=440, seed_offset=9000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    # Broad medium soft washes across full portrait
-    s2_parts.append(
+            local_hand_prob=0.70, local_hand_radius=220.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["all"], tx2, ty2, ref_s2,
             btype=0, r_min=15.0, r_max=34.0, opacity_min=0.36, opacity_max=0.66,
             step_mult=0.55, max_half_steps=5, color_thresh=40.0, max_color_dev=45.0,
             min_gain_base=5.5, n_candidates=3600, max_accept=1200, seed_offset=12000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    # Directional bristle sculpting of portrait forms
-    s2_parts.append(
+            local_hand_prob=0.72, local_hand_radius=170.0,
+        ),
+    ]
+    commit_stage(2, s3)
+
+    # 4. FORMS — Medium bristle sculpting of 3D portrait volumes + facial planes
+    s4 = [
         run_error_guided_pass(
             canvas, target, weight, masks["fg"], tx2, ty2, ref_s2,
             btype=1, r_min=10.0, r_max=22.0, opacity_min=0.45, opacity_max=0.76,
             step_mult=0.55, max_half_steps=6, color_thresh=38.0, max_color_dev=48.0,
-            min_gain_base=6.0, n_candidates=5800, max_accept=1950, seed_offset=20000,
+            min_gain_base=5.5, n_candidates=6200, max_accept=2150, seed_offset=20000,
             err_power=1.7, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    # Warm facial plane modeling
-    s2_parts.append(
+            local_hand_prob=0.75, local_hand_radius=150.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["face"], tx2, ty2, ref_s2,
             btype=0, r_min=7.5, r_max=17.0, opacity_min=0.30, opacity_max=0.56,
             step_mult=0.50, max_half_steps=4, color_thresh=28.0, max_color_dev=38.0,
-            min_gain_base=4.0, n_candidates=1600, max_accept=520, seed_offset=30000,
+            min_gain_base=3.8, n_candidates=1700, max_accept=560, seed_offset=30000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    s2 = np.vstack(s2_parts)
-    stage_arrays.append(s2)
-    stage_snapshots.append(canvas.copy())
-    print(f"Stage 2 strokes: {len(s2):,} | {compute_metrics(canvas, target, masks)['global_psnr']} dB")
+            local_hand_prob=0.75, local_hand_radius=95.0,
+        ),
+    ]
+    commit_stage(3, s4)
 
-    # =========================================================================
-    # STAGE 3: REFINEMENT (tightened forms, subtle silk glazing, brocade ground)
-    # =========================================================================
-    print("\n--- Stage 3: Refinement ---")
-    s3_parts = []
-    # Final silky calm background glaze
-    s3_parts.append(
+    # 5. MODELING — Final serene silk background glaze + medium-small bristle modeling
+    s5 = [
         run_error_guided_pass(
             canvas, target, weight, masks["bg"], tx2, ty2, ref_s2,
             btype=0, r_min=20.0, r_max=48.0, opacity_min=0.16, opacity_max=0.34,
             step_mult=0.55, max_half_steps=5, color_thresh=18.0, max_color_dev=22.0,
-            min_gain_base=0.6, n_candidates=1400, max_accept=520, seed_offset=38000,
+            min_gain_base=0.55, n_candidates=1500, max_accept=560, seed_offset=38000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=False,
-        )
-    )
-    # Medium-small bristle refinement on foreground
-    s3_parts.append(
+            local_hand_prob=0.75, local_hand_radius=180.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["fg"], tx3, ty3, ref_s3,
-            btype=1, r_min=5.0, r_max=11.0, opacity_min=0.46, opacity_max=0.80,
+            btype=1, r_min=4.8, r_max=11.0, opacity_min=0.46, opacity_max=0.80,
             step_mult=0.55, max_half_steps=6, color_thresh=35.0, max_color_dev=56.0,
-            min_gain_base=5.0, n_candidates=12500, max_accept=4000, seed_offset=42000,
+            min_gain_base=4.8, n_candidates=13000, max_accept=4300, seed_offset=42000,
             err_power=1.8, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-    # Tight fine-round structural sculpting across foreground
-    s3_parts.append(
+            local_hand_prob=0.76, local_hand_radius=125.0,
+        ),
+    ]
+    commit_stage(4, s5)
+
+    # 6. REFINING — Tight structural shapes + subtle crimson silk brocade (운보문)
+    s6 = [
         run_error_guided_pass(
             canvas, target, weight, masks["fg"], tx3, ty3, ref_s3,
-            btype=2, r_min=3.0, r_max=6.8, opacity_min=0.48, opacity_max=0.84,
+            btype=2, r_min=2.8, r_max=6.6, opacity_min=0.48, opacity_max=0.84,
             step_mult=0.55, max_half_steps=6, color_thresh=34.0, max_color_dev=62.0,
-            min_gain_base=5.0, n_candidates=15000, max_accept=4800, seed_offset=60000,
+            min_gain_base=4.8, n_candidates=15500, max_accept=5100, seed_offset=60000,
             err_power=1.9, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-    # Subtle crimson robe brocade cloud-and-treasure texture (운보문)
-    s3_parts.append(
+            local_hand_prob=0.78, local_hand_radius=110.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["robe"], tx3, ty3, ref_s3,
-            btype=2, r_min=2.0, r_max=4.8, opacity_min=0.34, opacity_max=0.62,
-            step_mult=0.55, max_half_steps=5, color_thresh=26.0, max_color_dev=42.0,
-            min_gain_base=2.2, n_candidates=8500, max_accept=2600, seed_offset=76000,
+            btype=2, r_min=1.8, r_max=4.4, opacity_min=0.34, opacity_max=0.64,
+            step_mult=0.55, max_half_steps=5, color_thresh=26.0, max_color_dev=44.0,
+            min_gain_base=2.0, n_candidates=10000, max_accept=3200, seed_offset=76000,
             err_power=1.6, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-    s3 = np.vstack(s3_parts)
-    stage_arrays.append(s3)
-    stage_snapshots.append(canvas.copy())
-    print(f"Stage 3 strokes: {len(s3):,} | {compute_metrics(canvas, target, masks)['global_psnr']} dB")
+            local_hand_prob=0.78, local_hand_radius=110.0,
+        ),
+    ]
+    commit_stage(5, s6)
 
-    # =========================================================================
-    # STAGE 4: FINE DETAILS (master se-pil brushwork on every signature element)
-    # =========================================================================
-    print("\n--- Stage 4: Fine details ---")
-    s4_parts = []
-
-    # 4A. Medium-fine foreground precision (btype=2)
-    s4_parts.append(
+    # 7. DETAILS — Ink drapery contours (의습선), Samo hat grain, Leopard pelt radial fur
+    s7 = [
         run_error_guided_pass(
             canvas, target, weight, masks["fg"], tx4, ty4, ref_s4,
-            btype=2, r_min=1.6, r_max=3.6, opacity_min=0.50, opacity_max=0.86,
+            btype=2, r_min=1.5, r_max=3.4, opacity_min=0.50, opacity_max=0.86,
             step_mult=0.60, max_half_steps=6, color_thresh=34.0, max_color_dev=70.0,
-            min_gain_base=5.0, n_candidates=17000, max_accept=4800, seed_offset=90000,
+            min_gain_base=4.8, n_candidates=17000, max_accept=5000, seed_offset=90000,
             err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4B. Contour-ridge continuous ink drapery lines (의습선), hat rim & belt frames (btype=3)
-    s4_parts.append(
+            local_hand_prob=0.80, local_hand_radius=95.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["contour_fg"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.60, r_max=1.60, opacity_min=0.58, opacity_max=0.92,
+            btype=3, r_min=0.60, r_max=1.55, opacity_min=0.58, opacity_max=0.92,
             step_mult=0.72, max_half_steps=10, color_thresh=44.0, max_color_dev=90.0,
-            min_gain_base=2.2, n_candidates=22000, max_accept=6500, seed_offset=110000,
+            min_gain_base=2.1, n_candidates=22000, max_accept=6600, seed_offset=110000,
             err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4B2. Subtle crimson robe brocade clouds (운보문) & soft drapery highlights
-    s4_parts.append(
-        run_error_guided_pass(
-            canvas, target, weight, masks["robe"], tx4, ty4, ref_s4,
-            btype=2, r_min=1.3, r_max=3.4, opacity_min=0.32, opacity_max=0.64,
-            step_mult=0.55, max_half_steps=5, color_thresh=26.0, max_color_dev=48.0,
-            min_gain_base=1.8, n_candidates=11000, max_accept=3200, seed_offset=122000,
-            err_power=1.7, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4C. Samo Hat crown gauze texture & wing wood-grain swirls (양각)
-    s4_parts.append(
+            local_hand_prob=0.80, local_hand_radius=95.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["hat"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.50, r_max=1.45, opacity_min=0.50, opacity_max=0.88,
+            btype=3, r_min=0.50, r_max=1.40, opacity_min=0.50, opacity_max=0.88,
             step_mult=0.62, max_half_steps=8, color_thresh=38.0, max_color_dev=82.0,
             min_gain_base=1.8, n_candidates=11500, max_accept=3400, seed_offset=130000,
             err_power=1.9, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4D. Leopard Pelt (표피) outward feathery fur hairs + crescent rosettes
-    s4_parts.append(
+            local_hand_prob=0.82, local_hand_radius=75.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["pelt_left"], tx4, ty4, ref_s4,
             btype=3, r_min=0.50, r_max=1.45, opacity_min=0.46, opacity_max=0.88,
             step_mult=0.72, max_half_steps=8, color_thresh=48.0, max_color_dev=88.0,
-            min_gain_base=1.8, n_candidates=9500, max_accept=2850, seed_offset=140000,
+            min_gain_base=1.8, n_candidates=9500, max_accept=2800, seed_offset=140000,
             err_power=1.9, bias_x=-0.84, bias_y=0.54, bias_strength=0.40, peak_pooling=True,
-        )
-    )
-    s4_parts.append(
+            local_hand_prob=0.82, local_hand_radius=80.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["pelt_right"], tx4, ty4, ref_s4,
             btype=3, r_min=0.50, r_max=1.45, opacity_min=0.46, opacity_max=0.88,
             step_mult=0.72, max_half_steps=8, color_thresh=48.0, max_color_dev=88.0,
-            min_gain_base=1.8, n_candidates=9500, max_accept=2850, seed_offset=148000,
+            min_gain_base=1.8, n_candidates=9500, max_accept=2800, seed_offset=148000,
             err_power=1.9, bias_x=0.84, bias_y=0.54, bias_strength=0.40, peak_pooling=True,
-        )
-    )
+            local_hand_prob=0.82, local_hand_radius=80.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["robe"], tx4, ty4, ref_s4,
+            btype=2, r_min=1.25, r_max=3.2, opacity_min=0.32, opacity_max=0.64,
+            step_mult=0.55, max_half_steps=5, color_thresh=26.0, max_color_dev=50.0,
+            min_gain_base=1.7, n_candidates=9500, max_accept=2800, seed_offset=151000,
+            err_power=1.7, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=95.0,
+        ),
+    ]
+    commit_stage(6, s7)
 
-    # 4E. Twin-Tiger Chest Badge (쌍호흉배) & Belt (각대) micro-embroidery (spots, faces, waves, gold trim)
+    # 8. FINE DETAILS — Face fine modeling, twin-tiger chest badge embroidery, official belt, se-pil beard
     badge_belt = np.clip(masks["badge"] + masks["belt"], 0.0, 1.0)
-    s4_parts.append(
-        run_error_guided_pass(
-            canvas, target, weight, badge_belt, tx4, ty4, ref_s4,
-            btype=2, r_min=1.1, r_max=2.4, opacity_min=0.56, opacity_max=0.90,
-            step_mult=0.55, max_half_steps=5, color_thresh=34.0, max_color_dev=82.0,
-            min_gain_base=3.4, n_candidates=12000, max_accept=3500, seed_offset=156000,
-            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-    s4_parts.append(
-        run_error_guided_pass(
-            canvas, target, weight, badge_belt, tx4, ty4, ref_s4,
-            btype=3, r_min=0.50, r_max=1.35, opacity_min=0.58, opacity_max=0.94,
-            step_mult=0.55, max_half_steps=5, color_thresh=38.0, max_color_dev=94.0,
-            min_gain_base=2.0, n_candidates=18000, max_accept=5400, seed_offset=170000,
-            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-    # 4E2. Ultra-short curved micro-strokes for ringed tiger spots, eyes, whiskers & woven belt lattice
-    s4_parts.append(
-        run_error_guided_pass(
-            canvas, target, weight, badge_belt, tx4, ty4, ref_s4,
-            btype=3, r_min=0.45, r_max=0.90, opacity_min=0.58, opacity_max=0.94,
-            step_mult=0.45, max_half_steps=3, color_thresh=42.0, max_color_dev=98.0,
-            min_gain_base=1.4, n_candidates=20000, max_accept=5800, seed_offset=182000,
-            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4F. Long Flowing Beard, Sideburns & Mustache (세필 수염 — two ultra-fine vertical passes!)
-    s4_parts.append(
-        run_error_guided_pass(
-            canvas, target, weight, masks["beard"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.50, r_max=1.05, opacity_min=0.54, opacity_max=0.92,
-            step_mult=0.80, max_half_steps=11, color_thresh=54.0, max_color_dev=98.0,
-            min_gain_base=1.5, n_candidates=18000, max_accept=5600, seed_offset=190000,
-            err_power=1.9, bias_x=0.0, bias_y=1.0, bias_strength=0.60, peak_pooling=True,
-        )
-    )
-    s4_parts.append(
-        run_error_guided_pass(
-            canvas, target, weight, masks["beard"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.45, r_max=0.80, opacity_min=0.52, opacity_max=0.94,
-            step_mult=0.72, max_half_steps=9, color_thresh=58.0, max_color_dev=105.0,
-            min_gain_base=1.0, n_candidates=22000, max_accept=6800, seed_offset=201000,
-            err_power=1.9, bias_x=0.0, bias_y=1.0, bias_strength=0.64, peak_pooling=True,
-        )
-    )
-
-    # 4G. Face, Brows, Nose, Ears & Mouth delicate modeling + crisp hairlines
-    s4_parts.append(
+    s8 = [
         run_error_guided_pass(
             canvas, target, weight, masks["face"], tx4, ty4, ref_s4,
-            btype=2, r_min=1.0, r_max=2.4, opacity_min=0.40, opacity_max=0.82,
+            btype=2, r_min=0.95, r_max=2.2, opacity_min=0.40, opacity_max=0.82,
             step_mult=0.55, max_half_steps=5, color_thresh=26.0, max_color_dev=65.0,
-            min_gain_base=2.0, n_candidates=7500, max_accept=2200, seed_offset=210000,
+            min_gain_base=1.8, n_candidates=8000, max_accept=2400, seed_offset=154000,
             err_power=1.9, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-    s4_parts.append(
+            local_hand_prob=0.82, local_hand_radius=65.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, badge_belt, tx4, ty4, ref_s4,
+            btype=2, r_min=1.05, r_max=2.3, opacity_min=0.56, opacity_max=0.90,
+            step_mult=0.55, max_half_steps=5, color_thresh=34.0, max_color_dev=84.0,
+            min_gain_base=3.2, n_candidates=12000, max_accept=3500, seed_offset=156000,
+            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=70.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["badge_left"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.45, r_max=1.20, opacity_min=0.58, opacity_max=0.94,
+            step_mult=0.50, max_half_steps=4, color_thresh=40.0, max_color_dev=96.0,
+            min_gain_base=1.5, n_candidates=17000, max_accept=5200, seed_offset=166000,
+            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=55.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["badge_right"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.45, r_max=1.20, opacity_min=0.58, opacity_max=0.94,
+            step_mult=0.50, max_half_steps=4, color_thresh=40.0, max_color_dev=96.0,
+            min_gain_base=1.5, n_candidates=17000, max_accept=5200, seed_offset=176000,
+            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=55.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["belt"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.45, r_max=1.10, opacity_min=0.58, opacity_max=0.94,
+            step_mult=0.50, max_half_steps=5, color_thresh=40.0, max_color_dev=96.0,
+            min_gain_base=1.4, n_candidates=11000, max_accept=3300, seed_offset=184000,
+            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=60.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["beard"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.48, r_max=1.00, opacity_min=0.54, opacity_max=0.92,
+            step_mult=0.80, max_half_steps=11, color_thresh=54.0, max_color_dev=98.0,
+            min_gain_base=1.4, n_candidates=19000, max_accept=6000, seed_offset=190000,
+            err_power=1.9, bias_x=0.0, bias_y=1.0, bias_strength=0.60, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=65.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["beard"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.42, r_max=0.78, opacity_min=0.52, opacity_max=0.94,
+            step_mult=0.72, max_half_steps=9, color_thresh=58.0, max_color_dev=106.0,
+            min_gain_base=0.95, n_candidates=23000, max_accept=7200, seed_offset=201000,
+            err_power=1.9, bias_x=0.0, bias_y=1.0, bias_strength=0.65, peak_pooling=True,
+            local_hand_prob=0.82, local_hand_radius=55.0,
+        ),
+    ]
+    commit_stage(7, s8)
+
+    # 9. FINAL TOUCHES — Strictly finest se-pil precision: brows/nose/lips, left & right eyes, micro highlights
+    s9 = [
         run_error_guided_pass(
             canvas, target, weight, masks["face"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.45, r_max=1.15, opacity_min=0.48, opacity_max=0.90,
-            step_mult=0.55, max_half_steps=5, color_thresh=30.0, max_color_dev=82.0,
-            min_gain_base=1.3, n_candidates=11000, max_accept=3200, seed_offset=220000,
+            btype=3, r_min=0.42, r_max=0.95, opacity_min=0.48, opacity_max=0.90,
+            step_mult=0.55, max_half_steps=5, color_thresh=30.0, max_color_dev=84.0,
+            min_gain_base=1.1, n_candidates=11500, max_accept=3400, seed_offset=220000,
             err_power=1.9, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4H. Eyes ultra-fine signature finishing (eyelids, double-lid creases, irises, catchlights)
-    s4_parts.append(
+            local_hand_prob=0.84, local_hand_radius=55.0,
+        ),
         run_error_guided_pass(
-            canvas, target, weight, masks["eyes"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.45, r_max=0.90, opacity_min=0.54, opacity_max=0.94,
-            step_mult=0.48, max_half_steps=4, color_thresh=28.0, max_color_dev=92.0,
-            min_gain_base=0.7, n_candidates=6500, max_accept=1900, seed_offset=232000,
+            canvas, target, weight, masks["eye_left"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.40, r_max=0.80, opacity_min=0.54, opacity_max=0.94,
+            step_mult=0.46, max_half_steps=4, color_thresh=28.0, max_color_dev=92.0,
+            min_gain_base=0.50, n_candidates=4500, max_accept=1350, seed_offset=232000,
             err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
-
-    # 4I. Final high-residual precision polish across foreground
-    s4_parts.append(
+            local_hand_prob=0.85, local_hand_radius=32.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["eye_right"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.40, r_max=0.80, opacity_min=0.54, opacity_max=0.94,
+            step_mult=0.46, max_half_steps=4, color_thresh=28.0, max_color_dev=92.0,
+            min_gain_base=0.50, n_candidates=4500, max_accept=1350, seed_offset=237000,
+            err_power=2.0, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.85, local_hand_radius=32.0,
+        ),
+        run_error_guided_pass(
+            canvas, target, weight, masks["contour_fg"], tx4, ty4, ref_s4,
+            btype=3, r_min=0.42, r_max=0.88, opacity_min=0.54, opacity_max=0.92,
+            step_mult=0.60, max_half_steps=7, color_thresh=38.0, max_color_dev=92.0,
+            min_gain_base=2.2, n_candidates=13000, max_accept=3600, seed_offset=244000,
+            err_power=2.2, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
+            local_hand_prob=0.84, local_hand_radius=75.0,
+        ),
         run_error_guided_pass(
             canvas, target, weight, masks["fg"], tx4, ty4, ref_s4,
-            btype=3, r_min=0.50, r_max=1.35, opacity_min=0.54, opacity_max=0.90,
-            step_mult=0.55, max_half_steps=5, color_thresh=36.0, max_color_dev=88.0,
-            min_gain_base=3.2, n_candidates=16000, max_accept=4200, seed_offset=240000,
+            btype=3, r_min=0.42, r_max=0.88, opacity_min=0.54, opacity_max=0.92,
+            step_mult=0.52, max_half_steps=5, color_thresh=36.0, max_color_dev=90.0,
+            min_gain_base=2.6, n_candidates=14000, max_accept=3800, seed_offset=252000,
             err_power=2.2, bias_x=0.0, bias_y=0.0, bias_strength=0.0, peak_pooling=True,
-        )
-    )
+            local_hand_prob=0.82, local_hand_radius=85.0,
+        ),
+    ]
+    commit_stage(8, s9)
 
-    s4 = np.vstack(s4_parts)
-    stage_arrays.append(s4)
-    stage_snapshots.append(canvas.copy())
-
+    palette_step, palette_count = choose_palette_step(stage_arrays)
     metrics = compute_metrics(canvas, target, masks)
     stage_counts = [len(a) for a in stage_arrays]
     elapsed = time.perf_counter() - t0
@@ -1389,12 +1523,9 @@ def main() -> None:
         "version": version_tag,
         "elapsed_sec": round(elapsed, 2),
         "total_strokes": int(sum(stage_counts)),
-        "stage_counts": {
-            "Blocking in": stage_counts[0],
-            "Form and color": stage_counts[1],
-            "Refinement": stage_counts[2],
-            "Fine details": stage_counts[3],
-        },
+        "palette_step": palette_step,
+        "palette_swatches": palette_count,
+        "stage_counts": {STAGE_NAMES[i]: stage_counts[i] for i in range(9)},
         "metrics": metrics,
     }
     with open(INT_DIR / f"metrics_{version_tag}.json", "w", encoding="utf-8") as f:
@@ -1404,7 +1535,7 @@ def main() -> None:
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
     save_visualizations(version_tag, target, stage_snapshots, stage_counts)
-    export_painting_js(stage_arrays, w, h, ROOT / "painting-data.js")
+    export_painting_js(stage_arrays, w, h, palette_step, ROOT / "painting-data.js")
 
 
 if __name__ == "__main__":
