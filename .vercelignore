@@ -1,0 +1,12 @@
+.git
+.gitignore
+.vercel
+scripts
+intermediate_results
+interim_reports
+visualizations
+프롬프트.md
+__pycache__
+*.pyc
+*.nbc
+*.nbi

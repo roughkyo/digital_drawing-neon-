@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paint</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1 class="app-title">Paint</h1>
+      <span class="divider"></span>
+      <span class="stroke-counter" id="strokeCounter">0 strokes</span>
+    </div>
+    <div class="topbar-controls">
+      <button type="button" class="btn" id="btnPlayPause" title="Pause or resume painting">Pause</button>
+      <button type="button" class="btn" id="btnFinish" title="Complete remaining strokes">Finish</button>
+      <button type="button" class="btn" id="btnReset" title="Clear canvas and repaint from blank">Restart</button>
+    </div>
+  </header>
+
+  <section class="toolbar" aria-label="Brush controls">
+    <div class="tool-group">
+      <label class="tool-label" for="brushSize">Size</label>
+      <input type="range" id="brushSize" min="1" max="140" step="0.5" value="24" />
+      <span class="tool-value" id="brushSizeValue">24 px</span>
+      <span class="size-preview-wrap" aria-hidden="true">
+        <span class="size-preview-dot" id="sizePreviewDot"></span>
+      </span>
+    </div>
+
+    <span class="divider"></span>
+
+    <div class="tool-group">
+      <label class="tool-label" for="brushOpacity">Opacity</label>
+      <input type="range" id="brushOpacity" min="5" max="100" step="1" value="75" />
+      <span class="tool-value" id="brushOpacityValue">75%</span>
+    </div>
+
+    <span class="divider"></span>
+
+    <div class="tool-group">
+      <label class="tool-label" for="colorPicker">Color</label>
+      <label class="swatch-wrap" title="Current brush color">
+        <span class="color-swatch" id="colorSwatch"></span>
+        <input type="color" id="colorPicker" value="#c89e64" />
+      </label>
+      <span class="tool-value mono" id="colorHex">#C89E64</span>
+    </div>
+
+    <span class="divider"></span>
+
+    <div class="tool-group brush-mode-group">
+      <button type="button" class="mode-btn active" id="modeSoft" data-mode="0">Soft Round</button>
+      <button type="button" class="mode-btn" id="modeBristle" data-mode="1">Bristle</button>
+    </div>
+  </section>
+
+  <main class="workspace">
+    <section class="canvas-stage" id="canvasStage" aria-label="Painting canvas">
+      <canvas id="paintCanvas" width="1280" height="1932"></canvas>
+    </section>
+
+    <aside class="reference-panel" aria-label="Reference">
+      <div class="panel-header">
+        <span class="panel-title">Reference</span>
+      </div>
+      <div class="reference-frame">
+        <img id="referenceImage" src="reference.png" alt="Reference portrait" />
+      </div>
+      <div class="stage-box">
+        <div class="stage-caption">Current stage</div>
+        <div class="stage-label" id="stageLabel">Blocking in</div>
+        <div class="stage-steps" id="stageSteps" aria-hidden="true">
+          <span class="stage-pip active" data-stage="0"></span>
+          <span class="stage-pip" data-stage="1"></span>
+          <span class="stage-pip" data-stage="2"></span>
+          <span class="stage-pip" data-stage="3"></span>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="painting-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

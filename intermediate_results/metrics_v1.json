@@ -1,0 +1,36 @@
+{
+  "version": "v1",
+  "elapsed_sec": 17.68,
+  "total_strokes": 26573,
+  "stage_counts": {
+    "Blocking in": 715,
+    "Form and color": 2322,
+    "Refinement": 7186,
+    "Fine details": 16350
+  },
+  "metrics": {
+    "global_psnr": 26.898,
+    "global_ssim": 0.7057,
+    "global_mae": 6.824,
+    "eyes_psnr": 32.4,
+    "eyes_mae": 4.0,
+    "features_psnr": 27.38,
+    "features_mae": 6.28,
+    "face_psnr": 23.74,
+    "face_mae": 9.01,
+    "beard_psnr": 19.88,
+    "beard_mae": 16.08,
+    "hat_psnr": 26.06,
+    "hat_mae": 8.16,
+    "badge_psnr": 22.17,
+    "badge_mae": 12.46,
+    "belt_psnr": 23.91,
+    "belt_mae": 10.2,
+    "robe_psnr": 25.82,
+    "robe_mae": 7.88,
+    "pelt_psnr": 26.96,
+    "pelt_mae": 7.54,
+    "bg_psnr": 34.24,
+    "bg_mae": 3.7
+  }
+}
